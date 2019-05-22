@@ -1,71 +1,168 @@
 var http = require('http');
 var fs = require('fs');
 var url = require('url');
+var qs = require('querystring');
+var template = require('./lib/template.js');
+var path = require('path');
+var sanitizeHtml = require('sanitize-html');
+var mysql = require('mysql');
 
-function templateHTML(title,list,body){
-  return `
-  <!doctype html>
-  <html>
-  <head>
-    <title>WEB1 - ${title}</title>
-    <meta charset="utf-8">
-  </head>
-  <body>
-    <h1><a href="/">WEB</a></h1>
-    ${list}
-    ${body}
-  </body>
-  </html>
-  `;
-}
-
-function templateList(fileList){
-  var list='<ul>';
-  var i = 0;
-  while(i<fileList.length)
-  {
-    list = list + `<li><a href="/?id=${fileList[i]}">${fileList[i]}</a></li>`;
-    i +=1;
-  }
-  list= list + '</ul>';
-  return list;
-}
-
+var db = mysql.createConnection({
+  host : 'localhost',
+  user : 'root',
+  password : '16011205',
+  database : 'opentutorials'
+});
+db.connect();
+console.log(qs);
 var app = http.createServer(function(request,response){
-
-
     var _url = request.url;
-    var queryData = url.parse(_url,true).query;
-    var pathname = url.parse(_url,true).pathname;
-
-    if(pathname==='/'){
-      var title = queryData.id;
-      fs.readdir(`data`, function(err,fileList){
-        templateList(fileList);
-        fs.readFile(`data/${queryData.id}`,'utf8',function(err,description){
-          if(queryData.id === undefined){
-            title = 'Welcome';
-            description = 'Hello, Node.js';
-          }
-          var list = templateList(fileList);
-          var template = templateHTML(title,list,`<h2>${title}</h2>${description}`)
+    var queryData = url.parse(_url, true).query;
+    var pathname = url.parse(_url, true).pathname;
+    if(pathname === '/'){
+      if(queryData.id === undefined){ //id아무것도 없을때 welcome!      
+        db.query('SELECT * FROM topic',function(error, topics){
+          var title = 'Welcome';
+          var description = 'Hello, Node.js';
+          var list = template.list(topics);
+          var html = template.HTML(title,list,`<h2>${title}</h2>${description}`,`<a href = "/create">crerate</a>`
+          );
           response.writeHead(200);
-          response.end(template);
-        })
+          response.end(html);
+        });
+      } else { //Querydata.id != undefined
+        db.query('SELECT * FROM topic',function(error, topics){
+          if(error){
+            throw error;
+          }
+          db.query(`SELECT * FROM topic WHERE id = ?`,[queryData.id],function(error2,topic){
+            if(error2){
+              throw error2;
+            }
+            console.log(queryData.id);
+            console.log(topic);
+            var title = topic[0].title;
+            var description = topic[0].description;
+            var list = template.list(topics);
+            var html = template.HTML(title, list,
+              `<h2>${title}</h2>${description}`,
+              ` <a href="/create">create</a>
+                <a href="/update?id=${queryData.id}">update</a>
+                <form action="delete_process" method="post">
+                  <input type="hidden" name="id" value="${queryData.id}">
+                  <input type="submit" value="delete">
+                </form>` 
+            );
+            response.writeHead(200);
+            response.end(html);
+          })//where id end 
+        });
+      }// end of Querydata.id
+    } else if(pathname === '/create'){
+      db.query('SELECT * FROM topic',function(error, topics){
+        var title = 'Create';
+        var list = template.list(topics);
+        var html = template.HTML(title,list,
+           `
+          <form action="/create_process" method="post">
+            <p><input type="text" name="title" placeholder="title"></p>
+            <p>
+              <textarea name="description" placeholder="description"></textarea>
+            </p>
+            <p>
+              <input type="submit">
+            </p>
+          </form>
+          `,
+          `<a href = "/create">crerate</a>`
+        );
+        response.writeHead(200);
+        response.end(html);
       });
+    } else if(pathname === '/create_process'){
+      var body = '';
+      request.on('data', function(data){
+          body = body + data;
+      });
+      request.on('end', function(){
+        var post = qs.parse(body);
+        console.log("insert!!!!!");
+        db.query(`INSERT INTO topic (title, description, created, author_id)
+          VALUES (?,?,now(),?)` , [post.title,post.description, 1],
+          function (error, result){
+            if(error){
+              throw error;
+            }
+          console.log(result.insertId);
+          response.writeHead(302, {Location: `/?id=${result.insertId}`});
+          response.end();
+          }
+        )
+      });
+    } else if(pathname === '/update'){
+      db.query('SELECT * FROM topic',function(error, topics){
+        if( error ){
+          throw error;
+        }
+        db.query(`SELECT * FROM topic WHERE id = ?`,[queryData.id],function(error2,topic){
+          if(error2){
+            throw error2;
+          }
+          var list = template.list(topics);
+          var html = template.HTML(topic[0].title,list,
+            `
+            <form action="/update_process" method="post">
+              <input type="hidden" name="id" value="${topic[0].id}">
+              <p><input type="text" name="title" placeholder="title" value="${topic[0].title}"></p>
+              <p>
+                <textarea name="description" placeholder="description">${topic[0].description}</textarea>
+              </p>
+              <p>
+                <input type="submit">
+              </p>
+            </form>
+            `,
+            `<a href="/update">undate</a>`
+          );
+        response.writeHead(200);
+        response.end(html);
+       });
+      });
+        
+      } else if(pathname === '/update_process'){
+        var body = '';
+        request.on('data', function(data){
+            body = body + data;
+        });
+        request.on('end', function(){
+          var post = qs.parse(body);
+          console.log(post);
+          db.query(`UPDATE topic SET title= ?,description = ? ,author_id=1 WHERE id = ? `,[post.title,post.description,post.id],
+          function(error, results){
+            if(error){
+              throw error;
+            }
+            response.writeHead(302, {Location: `/?id=${post.id}`});
+            response.end();
+          })
+        });
+      } else if(pathname === '/delete_process'){
+      var body = '';
+      request.on('data', function(data){
+          body = body + data;
+      });
+      request.on('end', function(){
+          var post = qs.parse(body);
+
+          db.query(`DELETE FROM topic WHERE id=?`,[post.id],function(error,results){
+            response.writeHead(302, {Location: `/`});
+            response.end();
+          });
+
+      }); 
     } else {
       response.writeHead(404);
       response.end('Not found');
     }
-
-
-    //This method signals to the server  /that all of the response headers and body have been sent; that server should consider this message complete. 이 메소드는 모든 response headers와 body가 전송되었다는것을 서버한테 알린다.
-
-
-    //console.log(__dirname + _url);
-
-    //response.end(fs.readFileSync(__dirname + _url));
-    //선택한 파일을 찾아서 읽어주는 코드
-
 });
 app.listen(3000);
