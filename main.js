@@ -8,10 +8,10 @@ var sanitizeHtml = require('sanitize-html');
 var mysql = require('mysql');
 
 var db = mysql.createConnection({
-  host : 'localhost',
-  user : 'root',
-  password : '16011205',
-  database : 'opentutorials'
+  host : '',
+  user : '',
+  password : '',
+  database : ''
 });
 db.connect();
 console.log(qs);
